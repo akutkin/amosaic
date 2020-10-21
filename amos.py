@@ -135,7 +135,10 @@ def fits_reconvolve_psf(fitsfile, newpsf, out=None):
             norm = newpsf.to_value() / currentpsf.to_value()
             if len(hdul[0].data.shape) == 4:
                 print(kern)
-                hdul[0].data[0,0,...] = norm * convolve(hdul[0].data[0,0,...], kern)
+                hdul[0].data[0,0,...] = norm * convolve(hdul[0].data[0,0,...], kern,
+                                                        normalize_kernel=False,
+                                                        nan_treatment='fill',
+                                                        preserve_nan=True)
             else:
                 hdul[0].data = norm * convolve(hdul[0].data, kern)
             hdr = newpsf.attach_to_header(hdr)
@@ -264,7 +267,7 @@ def main(images, pbimages, reference=None, pbclip=0.1, output='mosaic.fits', log
         cropped_image, cutout = fits_crop(pbcorr_image, out=cropped_image)
 # convolution with common psf
         logging.info('Reconvolving to common PSF')
-        reconvolved_image = os.path.basename(cropped_image.replace('.fits', '_reconv.fits'))
+        reconvolved_image = os.path.basename(cropped_image.replace('.fits', '_rec.fits'))
         reconvolved_image = fits_reconvolve_psf(cropped_image, common_psf, out=reconvolved_image)
         corrimages.append(reconvolved_image)
 # primary beam weights
