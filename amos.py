@@ -136,11 +136,13 @@ def fits_reconvolve_psf(fitsfile, newpsf, out=None):
             if len(hdul[0].data.shape) == 4:
                 print(kern)
                 hdul[0].data[0,0,...] = norm * convolve(hdul[0].data[0,0,...], kern,
-                                                        normalize_kernel=False,
-                                                        nan_treatment='fill',
-                                                        preserve_nan=True)
+                                                        boundary='fill', fill_value=np.nan)
+                                                        # normalize_kernel=False,
+                                                        # nan_treatment='fill',
+                                                        # preserve_nan=True)
             else:
-                hdul[0].data = norm * convolve(hdul[0].data, kern)
+                hdul[0].data = norm * convolve(hdul[0].data, kern,
+                                               boundary='fill', fill_value=np.nan)
             hdr = newpsf.attach_to_header(hdr)
         fits.writeto(out, data=hdul[0].data, header=hdr, overwrite=True)
     return out
