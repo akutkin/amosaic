@@ -137,9 +137,6 @@ def fits_reconvolve_psf(fitsfile, newpsf, out=None):
                 print(kern)
                 hdul[0].data[0,0,...] = norm * convolve(hdul[0].data[0,0,...], kern,
                                                         boundary='fill', fill_value=np.nan)
-                                                        # normalize_kernel=False,
-                                                        # nan_treatment='fill',
-                                                        # preserve_nan=True)
             else:
                 hdul[0].data = norm * convolve(hdul[0].data, kern,
                                                boundary='fill', fill_value=np.nan)
