@@ -265,11 +265,11 @@ def main(images, pbimages, reference=None, pbclip=0.1, output='mosaic.fits', log
         pbcorr_image, pbarray = pbcorrect(img, pb, pbclip=pbclip, out=pbcorr_image)
 # cropping
         logging.info('Cropping')
-        cropped_image = os.path.basename(img.replace('.fits', '_crp.fits'))
+        cropped_image = os.path.basename(img.replace('.fits', '_tmp.fits'))
         cropped_image, cutout = fits_crop(pbcorr_image, out=cropped_image)
 # convolution with common psf
         logging.info('Reconvolving to common PSF')
-        reconvolved_image = os.path.basename(cropped_image.replace('.fits', '_rec.fits'))
+        reconvolved_image = os.path.basename(cropped_image.replace('.fits', '_mos.fits'))
         reconvolved_image = fits_reconvolve_psf(cropped_image, common_psf, out=reconvolved_image)
         corrimages.append(reconvolved_image)
 # primary beam weights
