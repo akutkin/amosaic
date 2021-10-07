@@ -103,8 +103,12 @@ def fits_operation(fitsfile, other, operation='-', out=None):
         out = fitsfile
     if isinstance(other, str):
         other_data = fits.getdata(other)
-    elif isinstance(other, np.ndarray) or isinstance(other, np.float):
+    elif isinstance(other, np.ndarray) or isinstance(other, np.float) or isinstance(other, int):
         other_data = other
+    else:
+        logging.error('Undefinded other type for fits_operation')
+        raise(TypeError)
+
     with fits.open(fitsfile) as hdul:
         data = hdul[0].data
         if operation == '-':
@@ -173,12 +177,8 @@ def fits_reconvolve_psf(fitsfile, newpsf, out=None):
                 conv_data = hdul[0].data[0,0,...]
             elif len(hdul[0].data.shape) == 2:
                 conv_data = hdul[0].data
-            # deconvolve with the old PSF
-            # conv_data = convolve_gaussian_kernel(conv_data, kmaj1, kmin1, kpa1, inverse=True)
-            # convolve to the new PSF
             conv_data = norm * reconvolve_gaussian_kernel(conv_data, kmaj1, kmin1, kpa1,
                                                                      kmaj2, kmin2, kpa2)
-
             if len(hdul[0].data.shape) == 4:
                 hdul[0].data[0,0,...] = conv_data
             elif len(hdul[0].data.shape) == 2:
