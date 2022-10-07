@@ -14,8 +14,8 @@ import subprocess
 # matplotlib.use('Agg')
 # import matplotlib.pyplot as plt
 # import matplotlib.colors as mc
-from astropy import units as u
 from astropy.time import Time
+from astropy import units as u
 from astropy.io import fits
 from astropy.coordinates import Angle
 from astropy.coordinates import SkyCoord
@@ -23,6 +23,8 @@ from astropy.convolution import convolve, convolve_fft
 from astropy.nddata import Cutout2D
 from astropy.wcs import WCS
 import argparse
+
+import re
 
 from radio_beam import Beam, Beams
 from radio_beam import EllipticalGaussian2DKernel
@@ -34,6 +36,23 @@ import logging
 
 from scipy.fft import fft2, fftshift, ifft2, ifftshift
 
+
+def check_resolution(fitsfiles, nsigma=3):
+    """
+    check if there are outliers in terms of resolution
+    (the final mosaic will be smoothed to the lowest resolution)
+    """
+    res = np.array([fits.getheader(f)['bmaj'] for f in fitsfiles])
+    logging.info('Checing angular resolution (Mean bmaj is %s", STD is %s")',
+                 np.round(np.mean(res)*3600,1), np.round(np.std(res)*3600,1))
+    # if any(res>np.quantile(res,0.98)):
+    status = 0
+    for i, r in enumerate(res>(np.mean(res)+np.std(res)*nsigma)):
+        if r:
+            logging.warning('Outlier detected. Consider remove from mosaic:\n %s (bmaj=%s")',
+                            fitsfiles[i], np.round(np.mean(res[i])*3600,1))
+            status = 1
+    return status
 
 
 def clean_mosaic_tmp_data(path='.'):
@@ -395,14 +414,17 @@ def main(images, pbimages, reference=None, pbclip=0.1, output='mosaic.fits',
 
 if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO)
-    logging.info("MOSAIC tool")
+    logging.info("Welcome to the mosaicing tool")
     parser = argparse.ArgumentParser(description='Mosaic fits images with primary beam correction and weighting')
-    parser.add_argument('-g', '--glob', default='', help='Use glob on the directory. DANGEROUS')
-    parser.add_argument('-i', '--images', nargs='+')
-    parser.add_argument('-b', '--pbeams', nargs='+')
+    parser.add_argument('-g', '--glob', default='', help='Use glob on the directory. Must contain only images to mosaic. Use with --path_to_beams parameter')
+    parser.add_argument('-p', '--path_to_beams', default='/kutkin/apertif_beam_models', help='Use models from this path with glob.')
+    parser.add_argument('-i', '--images', nargs='+', help='images space-separated')
+    parser.add_argument('-b', '--pbeams', nargs='+', help='Beam models space-separated corresponding to the images')
     parser.add_argument('-r', '--reference', help='Reference RA,Dec (ex. "14h02m43,53d47m10s")')
-    parser.add_argument('-c', '--clip', type=float, nargs='?', default=None, help='Pbeam clip')
-    parser.add_argument('-o', '--output', nargs='?', default='mosaic.fits', help='Output_file_name')
+    parser.add_argument('-c', '--clip', type=float, nargs='?', default=0.1, help='Pbeam clip (default 0.1)')
+    parser.add_argument('-o', '--output', nargs='?', default='mosaic.fits', help='Output_file_name (default mosaic.fits)')
+    parser.add_argument('--check_resolution', action='store_true', help='Check images for reolution outliers. Good to use before mosaicing.')
+
 
     args = parser.parse_args()
 
@@ -418,11 +440,21 @@ if __name__ == "__main__":
 
     if glb:
         logging.warning('--glob key is set. looking for files in %s', glb)
-        images = sorted(glob.glob('{}/[1-2][0,9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]_[0-3][0-9].fits'.format(glb)))
-        pbimages = sorted(glob.glob('{}/[1-2][0,9][0-9][0-9][0-9][0-9]_[0-3][0-9]_I_model.fits'.format(glb)))
+        if glb == '.':
+            images = sorted(glob.glob('{}/*[1-2][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]_[0-3][0-9]*.fits'.format(glb)))
+        else:
+            images = sorted(glob.glob('{}/[1-2][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]_[0-3][0-9].fits'.format(glb)))
+
+        bms = [re.findall('\w*\d{9}_(\d{2})\w*', i)[0] for i in images]
+        pbimages = []
+        for b in bms:
+            pbimages.append(f'{args.path_to_beams}/{b}_gp_avg_orig.fits')
+
+    outliers = check_resolution(images)
+    if args.check_resolution and outliers:
+        sys.exit()
 
     t0 = Time.now()
     main(images, pbimages, reference=ref, pbclip=pbclip)
     extime = Time.now() - t0
     print("Execution time: {:.1f} min".format(extime.to("minute").value))
-
