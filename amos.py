@@ -36,6 +36,9 @@ import logging
 
 from scipy.fft import fft2, fftshift, ifft2, ifftshift
 
+import dask
+from dask.distributed import Client, LocalCluster
+
 
 def check_resolution(fitsfiles, nsigma=3):
     """
@@ -320,11 +323,49 @@ def pbcorrect(image, pbimage, pbclip=None, rmnoise=False, out=None):
     return img_corr, img_uncorr, pbarray
 
 
+
+def prepare_image(img, pb, common_psf, rmnoise):
+    """
+    prepare image for mosaicing
+    """
+
+    logging.info('Image: %s', img)
+    logging.info('PBeam: %s', pb)
+# prepare the images (squeeze, transfer_coordinates, reproject, regrid pbeam, correct...)
+
+# convolution with common psf
+    reconvolved_image = os.path.basename(img.replace('.fits', '_reconv_tmp.fits'))
+    reconvolved_image = fits_reconvolve_psf(img, common_psf, out=reconvolved_image)
+
+# PB correction
+    pbcorr_image = os.path.basename(img.replace('.fits', '_pbcorr_tmp.fits'))
+    pbcorr_image, uncorr_image, pbarray = pbcorrect(reconvolved_image, pb, pbclip=pbclip,
+                                      rmnoise=rmnoise, out=pbcorr_image)
+# cropping
+    cropped_image = os.path.basename(img.replace('.fits', '_mos.fits'))
+    cropped_image, cutout = fits_crop(pbcorr_image, out=cropped_image)
+
+    uncorr_cropped_image = os.path.basename(img.replace('.fits', '_uncorr.fits'))
+    uncorr_cropped_image, _ = fits_crop(uncorr_image, out=uncorr_cropped_image)
+
+# primary beam weights
+    wg_arr = pbarray #
+    wg_arr[np.isnan(wg_arr)] = 0 # the NaNs weight 0
+    wg_arr = wg_arr**2 / np.nanmax(wg_arr**2) # normalize
+    wcut = Cutout2D(wg_arr, cutout.input_position_original, cutout.shape)
+    return cropped_image, uncorr_cropped_image, wcut.data
+
+
 def main(images, pbimages, reference=None, pbclip=0.1, output='mosaic.fits',
          clean_temporary_files=True, rmnoise=False, logger=None):
     if logger is None:
         logger = logging.getLogger('amos')
     common_psf = get_common_psf(images)
+
+    cluster = LocalCluster()  # Launches a scheduler and workers locally
+    client = Client(cluster)  # Connect to distributed cluster and override default
+    client.cluster.scale(10)
+    print("Check it:", client.dashboard_link)
 
     corrimages = [] # to mosaic
     uncorrimages = []
@@ -332,33 +373,11 @@ def main(images, pbimages, reference=None, pbclip=0.1, output='mosaic.fits',
     rmsweights = [] # of the images themself
     # weight_images = []
     for img, pb in zip(images, pbimages):
-        logger.info('Image: %s', img)
-        logger.info('PBeam: %s', pb)
-# prepare the images (squeeze, transfer_coordinates, reproject, regrid pbeam, correct...)
-
-# convolution with common psf
-        reconvolved_image = os.path.basename(img.replace('.fits', '_reconv_tmp.fits'))
-        reconvolved_image = fits_reconvolve_psf(img, common_psf, out=reconvolved_image)
-
-# PB correction
-        pbcorr_image = os.path.basename(img.replace('.fits', '_pbcorr_tmp.fits'))
-        pbcorr_image, uncorr_image, pbarray = pbcorrect(reconvolved_image, pb, pbclip=pbclip,
-                                          rmnoise=rmnoise, out=pbcorr_image)
-# cropping
-        cropped_image = os.path.basename(img.replace('.fits', '_mos.fits'))
-        cropped_image, cutout = fits_crop(pbcorr_image, out=cropped_image)
-
-        uncorr_cropped_image = os.path.basename(img.replace('.fits', '_uncorr.fits'))
-        uncorr_cropped_image, _ = fits_crop(uncorr_image, out=uncorr_cropped_image)
-
+        cropped_image, uncorr_cropped_image, wcutdata = dask.delayed(prepare_image)(img, pb, common_psf, rmnoise)
         corrimages.append(cropped_image)
         uncorrimages.append(uncorr_cropped_image)
-# primary beam weights
-        wg_arr = pbarray #
-        wg_arr[np.isnan(wg_arr)] = 0 # the NaNs weight 0
-        wg_arr = wg_arr**2 / np.nanmax(wg_arr**2) # normalize
-        wcut = Cutout2D(wg_arr, cutout.input_position_original, cutout.shape)
-        pbweights.append(wcut.data)
+        pbweights.append(wcutdata)
+
 # weight the images by RMS noise over the edges
         # imdata = np.squeeze(fits.getdata(img))
         # l, m = imdata.shape[0]//10,  imdata.shape[1]//10
@@ -374,17 +393,17 @@ def main(images, pbimages, reference=None, pbclip=0.1, output='mosaic.fits',
 # create the wcs and footprint for output mosaic
 
     logging.info('Mosaicing...')
-    wcs_out, shape_out = find_optimal_celestial_wcs(corrimages, auto_rotate=False, reference=reference)
+    wcs_out, shape_out = dask.delayed(find_optimal_celestial_wcs)(corrimages, auto_rotate=False, reference=reference)
 
-    array, footprint = reproject_and_coadd(corrimages, wcs_out, shape_out=shape_out,
+    array, footprint = dask.delayed(reproject_and_coadd)(corrimages, wcs_out, shape_out=shape_out,
                                             reproject_function=reproject_interp,
                                             input_weights=pbweights)
-    array2, _ = reproject_and_coadd(uncorrimages, wcs_out, shape_out=shape_out,
+    array2, _ = dask.delayed(reproject_and_coadd)(uncorrimages, wcs_out, shape_out=shape_out,
                                             reproject_function=reproject_interp,
                                             input_weights=pbweights)
 
-    array = np.float32(array)
-    array2 = np.float32(array2)
+    array = np.float32(array.compute())
+    array2 = np.float32(array2.compute())
 
     # plt.imshow(array)
 
