@@ -324,7 +324,7 @@ def pbcorrect(image, pbimage, pbclip=None, rmnoise=False, out=None):
 
 
 
-def prepare_image(img, pb, common_psf, rmnoise):
+def prepare_image(img, pb, common_psf, rmnoise, pbclip=0.1):
     """
     prepare image for mosaicing
     """
@@ -365,7 +365,9 @@ def main(images, pbimages, reference=None, pbclip=0.1, output='mosaic.fits',
     cluster = LocalCluster()  # Launches a scheduler and workers locally
     client = Client(cluster)  # Connect to distributed cluster and override default
     client.cluster.scale(10)
+    print('=============================================')
     print("Check it:", client.dashboard_link)
+    print('=============================================')
 
     corrimages = [] # to mosaic
     uncorrimages = []
@@ -373,10 +375,10 @@ def main(images, pbimages, reference=None, pbclip=0.1, output='mosaic.fits',
     rmsweights = [] # of the images themself
     # weight_images = []
     for img, pb in zip(images, pbimages):
-        cropped_image, uncorr_cropped_image, wcutdata = dask.delayed(prepare_image)(img, pb, common_psf, rmnoise)
-        corrimages.append(cropped_image)
-        uncorrimages.append(uncorr_cropped_image)
-        pbweights.append(wcutdata)
+        res = dask.delayed(prepare_image, nout=3)(img, pb, common_psf, rmnoise)
+        corrimages.append(res[0])
+        uncorrimages.append(res[1])
+        pbweights.append(res[2])
 
 # weight the images by RMS noise over the edges
         # imdata = np.squeeze(fits.getdata(img))
@@ -393,23 +395,23 @@ def main(images, pbimages, reference=None, pbclip=0.1, output='mosaic.fits',
 # create the wcs and footprint for output mosaic
 
     logging.info('Mosaicing...')
-    wcs_out, shape_out = dask.delayed(find_optimal_celestial_wcs)(corrimages, auto_rotate=False, reference=reference)
+    wout = dask.delayed(find_optimal_celestial_wcs)(corrimages, auto_rotate=False, reference=reference)
 
-    array, footprint = dask.delayed(reproject_and_coadd)(corrimages, wcs_out, shape_out=shape_out,
+    array1 = dask.delayed(reproject_and_coadd)(corrimages, wout[0], shape_out=wout[1],
                                             reproject_function=reproject_interp,
                                             input_weights=pbweights)
-    array2, _ = dask.delayed(reproject_and_coadd)(uncorrimages, wcs_out, shape_out=shape_out,
+    array2 = dask.delayed(reproject_and_coadd)(uncorrimages, wout[0], shape_out=wout[1],
                                             reproject_function=reproject_interp,
                                             input_weights=pbweights)
 
-    array = np.float32(array.compute())
-    array2 = np.float32(array2.compute())
+    array = np.float32(array1[0].compute())
+    array2 = np.float32(array2[0].compute())
 
     # plt.imshow(array)
 
 # insert common PSF into the header
     psf = common_psf.to_header_keywords()
-    hdr = wcs_out.to_header()
+    hdr = wout[0].compute().to_header()
     hdr.insert('RADESYS', ('FREQ', 1.4E9))
     hdr.insert('RADESYS', ('BMAJ', psf['BMAJ']))
     hdr.insert('RADESYS', ('BMIN', psf['BMIN']))
@@ -418,6 +420,9 @@ def main(images, pbimages, reference=None, pbclip=0.1, output='mosaic.fits',
 # insert units to header:
     hdr.insert('RADESYS', ('BUNIT', 'JY/BEAM'))
 
+    print(array)
+    print('==============================')
+    print(hdr)
 
     fits.writeto(output, data=array,
                  header=hdr, overwrite=True)
