@@ -435,6 +435,11 @@ def main(images, pbimages, reference=None, pbclip=0.1, output='mosaic.fits',
         logging.debug('Cleaning directory')
         clean_mosaic_tmp_data('.')
 
+    print('Computation complete! Stopping workers...')
+    client.close()
+    sleep(1)
+    cluster.close()
+
 
 if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO)
