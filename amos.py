@@ -175,12 +175,15 @@ def reconvolve_gaussian_kernel(img, old_maj, old_min, old_pa, new_maj, new_min, 
     return ifft2(fconv).real + imean
 
 
-def fits_reconvolve_psf(fitsfile, newpsf, out=None):
+def fits_reconvolve_psf(fitsfile, newpsf, force=False, out=None):
     """ Convolve image with deconvolution of (newpsf, oldpsf) """
     newparams = newpsf.to_header_keywords()
     if out is None:
         logging.debug('fits_reconvolve: Overwriting file %s', fitsfile)
         out = fitsfile
+    if not force and os.path.exists(out):
+        logging.info('Reconvolved image exists. Skipping...')
+        return out
     with fits.open(fitsfile) as hdul:
         hdr = hdul[0].header
         currentpsf = Beam.from_fits_header(hdr)
@@ -279,7 +282,12 @@ def fits_transpose(fitsfile):
 
 
 
-def pbcorrect(image, pbimage, pbclip=None, rmnoise=False, out=None):
+def pbcorrect(image, pbimage, pbclip=None, rmnoise=False, force=False, out=None):
+
+    # if not force and out is not None and os.path.exists(out):
+        # logging.info('Corrected image exists. Skipping...')
+        # return out
+
     tmpimg = make_tmp_copy(image)
     tmppb = make_tmp_copy(pbimage)
     tmpimg = fits_squeeze(tmpimg) # remove extra dimentions
